@@ -42,7 +42,7 @@ class CLWDevice : public ReferenceCounter<cl_device_id, clRetainDevice, clReleas
 {
 public:
     static CLWDevice Create(cl_device_id id);
-    
+
     CLWDevice() = default;
     virtual ~CLWDevice() = default;
 
@@ -75,21 +75,21 @@ private:
     //CLWDevice(CLWDevice const&);
     //CLWDevice& operator = (CLWDevice const&);
     CLWDevice(cl_device_id id);
-    
+
     std::string              name_;
     std::string              vendor_;
     std::string              version_;
     std::string              profile_;
     std::string              extensions_;
     cl_device_type           type_;
-    
+
     cl_ulong                 localMemSize_;
     cl_ulong                 globalMemSize_;
     cl_ulong                 maxAllocSize_;
     cl_device_local_mem_type localMemType_;
     size_t                   maxWorkGroupSize_;
     cl_uint                     minAlignSize_;
-    
+
     friend class CLWPlatform;
 };
 

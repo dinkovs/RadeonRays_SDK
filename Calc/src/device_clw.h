@@ -52,7 +52,7 @@ namespace Calc
         void ReadBuffer(Buffer const* buffer, std::uint32_t queue, std::size_t offset, std::size_t size, void* dst, Event** e) const override;
         void WriteBuffer(Buffer const* buffer, std::uint32_t queue, std::size_t offset, std::size_t size, void* src, Event** e) override;
 
-        // Buffer mapping 
+        // Buffer mapping
         void MapBuffer(Buffer const* buffer, std::uint32_t queue, std::size_t offset, std::size_t size, std::uint32_t map_type, void** mapdata, Event** e) override;
         void UnmapBuffer(Buffer const* buffer, std::uint32_t queue, void* mapdata, Event** e) override;
 
@@ -68,7 +68,8 @@ namespace Calc
         void GetExecutableBinary(Executable const* executable, std::uint8_t* binary) const override;
 
         // Execution
-        void Execute(Function const* func, std::uint32_t queue, size_t global_size, size_t local_size, Event** e) override;
+        float Execute(Function const* func, std::uint32_t queue, size_t global_size, size_t local_size, Event** e) override;
+        float Execute(Function const* func, std::uint32_t queue, size_t global_size, Event** e) override;
 
         // Events handling
         void WaitForEvent(Event* e) override;
@@ -83,7 +84,7 @@ namespace Calc
         bool HasBuiltinPrimitives() const override;
         Primitives* CreatePrimitives() const override;
         void DeletePrimitives(Primitives* prims) override;
-        
+
         // DeviceCl overrides
         Buffer* CreateBuffer(cl_mem buffer) override;
 

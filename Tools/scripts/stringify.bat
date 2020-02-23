@@ -1,0 +1,2 @@
+del C:\git\RadeonProRender-Baikal\build\RadeonRays\RadeonRays\kernels_cl.h
+python stringify.py C:\git\RadeonProRender-Baikal\RadeonRays\RadeonRays\src\kernels\CL .cl opencl > C:\git\RadeonProRender-Baikal\build\RadeonRays\RadeonRays\kernels_cl.h

@@ -30,7 +30,7 @@ THE SOFTWARE.
 #include "calc_clw_common.h"
 
 namespace Calc
-{    
+{
     // Buffer implementation with CLW
     class BufferClw : public Buffer
     {
@@ -214,7 +214,7 @@ namespace Calc
             m_event_pool.push(new EventClw());
         }
     }
-    
+
     DeviceClw::DeviceClw(CLWDevice device, CLWContext context)
     : m_device(device)
     , m_context(context)
@@ -290,6 +290,8 @@ namespace Calc
         {
             CLWEvent event = m_context.ReadBuffer(queue, buffer_clw->GetData(), static_cast<char*>(dst), offset, size);
 
+            event.Wait();
+
             if (e)
             {
                 auto event_clw = CreateEventClw();
@@ -310,6 +312,7 @@ namespace Calc
         try
         {
             CLWEvent event = m_context.WriteBuffer(queue, buffer_clw->GetData(), static_cast<char*>(src), offset, size);
+            event.Wait();
 
             if (e)
             {
@@ -405,11 +408,12 @@ namespace Calc
         }
         catch (CLWException& e)
         {
+            printf(e.what());
             throw ExceptionClw(e.what());
         }
 
     }
-    
+
     Executable* DeviceClw::CompileExecutable(char const* filename,
                                              char const** headernames,
                                              int numheaders,
@@ -439,7 +443,7 @@ namespace Calc
 
             buildopts.append(
 #if defined(__APPLE__)
-                "-D APPLE " 
+                "-D APPLE "
 #elif defined(_WIN32) || defined (WIN32)
                 "-D WIN32 "
 #elif defined(__linux__)
@@ -479,13 +483,17 @@ namespace Calc
 
     }
 
-    void DeviceClw::Execute(Function const* func, std::uint32_t queue, size_t global_size, size_t local_size, Event** e)
+    float DeviceClw::Execute(Function const* func, std::uint32_t queue, size_t global_size, Event** e)
     {
         auto func_clw = static_cast<FunctionClw const*>(func);
+        float duration = 0;
 
         try
         {
-            CLWEvent event = m_context.Launch1D(queue, global_size, local_size, func_clw->GetKernel());
+            CLWEvent event = m_context.Launch1D(queue, global_size, func_clw->GetKernel());
+
+            event.Wait();
+            duration = event.GetDuration();
 
             if (e)
             {
@@ -496,8 +504,39 @@ namespace Calc
         }
         catch (CLWException& e)
         {
+            printf(e.what());
             throw ExceptionClw(e.what());
         }
+
+        return duration;
+    }
+
+    float DeviceClw::Execute(Function const* func, std::uint32_t queue, size_t global_size, size_t local_size, Event** e)
+    {
+        auto func_clw = static_cast<FunctionClw const*>(func);
+        float duration = 0;
+
+        try
+        {
+            CLWEvent event = m_context.Launch1D(queue, global_size, local_size, func_clw->GetKernel());
+
+            event.Wait();
+            duration = event.GetDuration();
+
+            if (e)
+            {
+                auto event_clw = CreateEventClw();
+                event_clw->SetEvent(event);
+                *e = event_clw;
+            }
+        }
+        catch (CLWException& e)
+        {
+            printf(e.what());
+            throw ExceptionClw(e.what());
+        }
+
+        return duration;
     }
 
     void DeviceClw::WaitForEvent(Event* e)
@@ -561,7 +600,7 @@ namespace Calc
     {
         m_event_pool.push(e);
     }
-    
+
     Buffer* DeviceClw::CreateBuffer(cl_mem buffer)
     {
         try
@@ -581,24 +620,24 @@ namespace Calc
         PrimitivesClw(CLWContext context)
         {
             std::string buildopts = "";
-            
+
             buildopts.append(" -cl-mad-enable -cl-fast-relaxed-math -cl-std=CL1.2 -I . ");
-            
+
             bool isamd = context.GetDevice(0).GetVendor().find("AMD") != std::string::npos ||
             context.GetDevice(0).GetVendor().find("Advanced Micro Devices") != std::string::npos;
-            
+
             bool has_mediaops = context.GetDevice(0).GetExtensions().find("cl_amd_media_ops2") != std::string::npos;
-            
+
             if (isamd)
             {
                 buildopts.append(" -D AMD ");
             }
-            
+
             if (has_mediaops)
             {
                 buildopts.append(" -D AMD_MEDIA_OPS ");
             }
-            
+
             buildopts.append(
 #if defined(__APPLE__)
                              "-D APPLE "
@@ -610,7 +649,7 @@ namespace Calc
                              ""
 #endif
                              );
-            
+
             m_pp = CLWParallelPrimitives(context, buildopts.c_str());
         }
 

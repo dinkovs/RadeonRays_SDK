@@ -39,11 +39,11 @@ CLWContext CLWContext::Create(std::vector<CLWDevice> const& devices, cl_context_
     cl_int status = CL_SUCCESS;
     cl_context ctx = clCreateContext(props, static_cast<cl_int>(deviceIds.size()), &deviceIds[0], nullptr, nullptr, &status);
     ThrowIf(status != CL_SUCCESS, status, "clCreateContext failed");
-    
+
     CLWContext context(ctx, devices);
-    
+
     clReleaseContext(ctx);
-    
+
     return context;
 }
 
@@ -59,6 +59,18 @@ CLWContext CLWContext::Create(cl_context context, cl_device_id* device, cl_comma
     }
 
     return CLWContext(context, devices, cmdQueues);
+}
+
+CLWEvent CLWContext::Launch1D(unsigned int idx, size_t globalSize, cl_kernel kernel)
+{
+    cl_int status = CL_SUCCESS;
+    size_t wgGlobalSize = globalSize;
+    cl_event event = nullptr;
+
+    status = clEnqueueNDRangeKernel(commandQueues_[idx], kernel, 1, nullptr, &wgGlobalSize, nullptr, 0, nullptr, &event);
+    ThrowIf(status != CL_SUCCESS, status, "clEnqueueNDRangeKernel failed");
+
+    return CLWEvent::Create(event);
 }
 
 CLWEvent CLWContext::Launch1D(unsigned int idx, size_t globalSize, size_t localSize, cl_kernel kernel)
@@ -212,7 +224,7 @@ CLWContext::CLWContext(cl_context context, std::vector<CLWDevice> const& devices
 , devices_(devices)
 , commandQueues_(commandQueues)
 {
-    
+
 }
 
 CLWContext::CLWContext(cl_context context, std::vector<CLWDevice>&& devices, std::vector<CLWCommandQueue>&& commandQueues)
@@ -220,7 +232,7 @@ CLWContext::CLWContext(cl_context context, std::vector<CLWDevice>&& devices, std
 , devices_(devices)
 , commandQueues_(commandQueues)
 {
-    
+
 }
 
 CLWContext::CLWContext(CLWDevice device)

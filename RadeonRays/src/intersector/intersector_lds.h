@@ -24,9 +24,12 @@ THE SOFTWARE.
 #include "calc.h"
 #include "device.h"
 #include "intersector.h"
+#include "../accelerator/bvh2.h"
 
 namespace RadeonRays
 {
+    //namespace Calc { class Buffer; };
+
     class IntersectorLDS : public Intersector
     {
     public:
@@ -45,8 +48,17 @@ namespace RadeonRays
             std::uint32_t max_rays, Calc::Buffer *hits,
             const Calc::Event *wait_event, Calc::Event **event) const override;
 
+        void GetEPO(float* epo, uint32_t comp, uint32_t current, Bvh2* tree, bool totalSum = false) const;
+
+
     private:
         struct GpuData;
+
+        float m_totalArea;
+        float m_rootSA;
+
+        Calc::Buffer* m_epoBuffer;
+        Calc::Buffer* m_surfAreaBuffer;
 
         // Implementation data
         std::unique_ptr<GpuData> m_gpudata;

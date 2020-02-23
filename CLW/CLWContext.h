@@ -77,6 +77,7 @@ public:
     template <size_t globalSize, size_t localSize, typename ... Types> CLWEvent Launch1D(unsigned int idx, cl_kernel kernel, CLWEvent depEvent, Types ... args);
     template <size_t globalSize, size_t localSize, typename ... Types> CLWEvent Launch1D(unsigned int idx, cl_kernel kernel, std::vector<CLWEvent> const& events, Types ... args);
 
+    CLWEvent Launch1D(unsigned int idx, size_t globalSize, cl_kernel kernel);
     CLWEvent Launch1D(unsigned int idx, size_t globalSize, size_t localSize, cl_kernel kernel);
     CLWEvent Launch1D(unsigned int idx, size_t globalSize, size_t localSize, cl_kernel kernel, CLWEvent depEvent);
     CLWEvent Launch1D(unsigned int idx, size_t globalSize, size_t localSize, cl_kernel kernel, std::vector<CLWEvent> const& events);
@@ -92,7 +93,7 @@ public:
     void Finish(unsigned int idx) const;
     void Flush(unsigned int idx) const;
 
-    // GL interop 
+    // GL interop
     void AcquireGLObjects(unsigned int idx, std::vector<cl_mem> const& objects) const;
     void ReleaseGLObjects(unsigned int idx, std::vector<cl_mem> const& objects) const;
 
@@ -185,7 +186,7 @@ template <typename T> CLWEvent  CLWContext::CopyBuffer(unsigned int idx, CLWBuff
     cl_int status = CL_SUCCESS;
     cl_event event;
 
-    clEnqueueCopyBuffer(commandQueues_[idx], source, dest, srcOffset * sizeof(T), destOffset* sizeof(T), elemCount * sizeof(T), 0, nullptr, &event); 
+    clEnqueueCopyBuffer(commandQueues_[idx], source, dest, srcOffset * sizeof(T), destOffset* sizeof(T), elemCount * sizeof(T), 0, nullptr, &event);
     ThrowIf(status != CL_SUCCESS, status, "clEnqueueCopyBuffer failed");
 
     return CLWEvent::Create(event);

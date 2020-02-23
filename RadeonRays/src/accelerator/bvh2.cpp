@@ -135,8 +135,13 @@ namespace RadeonRays
     void Bvh2::Clear()
     {
         for (auto i = 0u; i < m_nodecount; ++i)
+        {
             m_nodes[i].~Node();
+            m_epoDatas[i].~EpoData();
+        }
         Deallocate(m_nodes);
+        Deallocate(m_epoDatas);
+        m_epoDatas = nullptr;
         m_nodes = nullptr;
         m_nodecount = 0;
     }
@@ -159,8 +164,14 @@ namespace RadeonRays
         m_nodes = reinterpret_cast<Node*>(
             Allocate(sizeof(Node) * m_nodecount, 16u));
 
+        m_epoDatas = reinterpret_cast<EpoData*>(
+            Allocate(sizeof(EpoData) * m_nodecount, 16u));
+
         for (auto i = 0u; i < m_nodecount; ++i)
+        {
             new (&m_nodes[i]) Node;
+            new (&m_epoDatas[i]) EpoData;
+        }
 
         auto constexpr inf = std::numeric_limits<float>::infinity();
         auto m128_plus_inf = _mm_set_ps(inf, inf, inf, inf);
@@ -319,7 +330,7 @@ namespace RadeonRays
          // Signal shutdown and wake up all the threads
         shutdown.store(true);
         cv.notify_all();
-            
+
         // Wait for all the threads to finish
         for (auto i = 0u; i < num_threads; ++i)
         {
@@ -502,6 +513,19 @@ namespace RadeonRays
         SplitRequest &request_left,
         SplitRequest &request_right)
     {
+        _mm_store_ps(m_epoDatas[request.index].aabb_max, request.aabb_max);
+        _mm_store_ps(m_epoDatas[request.index].aabb_min, request.aabb_min);
+
+        /*
+        for (auto i = 0u; i < request.num_refs; ++i)
+        {
+            auto face_data = metadata[refs[request.start_index + i]];
+            SetPrimitive(
+                m_epoDatas[request.index],
+                face_data);
+        }
+        */
+
         // Do we have enough primitives?
         if (request.num_refs <= kMaxLeafPrimitives)
         {
@@ -707,6 +731,11 @@ namespace RadeonRays
             request.aabb_max,
             request_left.index,
             request_right.index);
+
+        if (request_left.level > m_depth)
+        {
+            m_depth = request_left.level;
+        }
 
         return kInternal;
     }

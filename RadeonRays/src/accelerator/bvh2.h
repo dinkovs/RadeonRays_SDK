@@ -45,6 +45,8 @@ namespace RadeonRays
     {
         struct Node;
         struct SplitRequest;
+        struct EpoData;
+        struct Triangle;
 
     public:
         // Constructor
@@ -53,7 +55,9 @@ namespace RadeonRays
             , m_usesah(usesah)
             , m_traversal_cost(traversal_cost)
             , m_nodes(nullptr)
+            , m_epoDatas(nullptr)
             , m_nodecount(0)
+            , m_depth(0)
         {
         }
 
@@ -165,9 +169,48 @@ namespace RadeonRays
             std::uint32_t index,
             std::pair<const Shape *, std::size_t> ref);
 
+
+        static inline void SetPrimitive(
+            EpoData &node,
+            std::pair<const Shape *, std::size_t> ref);
+
         static inline bool IsInternal(const Node &node);
         static inline std::uint32_t GetChildIndex(const Node &node, std::uint8_t idx);
         static inline void PropagateBounds(Bvh2 &bvh);
+
+        // Encoded node format
+        struct Bvh2::Node
+        {
+            // Left AABB min or vertex 0 for a leaf node
+            float aabb_left_min_or_v0[3] = { 0.0f, 0.0f, 0.0f };
+            // Left child node address
+            uint32_t addr_left = kInvalidId;
+            // Left AABB max or vertex 1 for a leaf node
+            float aabb_left_max_or_v1[3] = { 0.0f, 0.0f, 0.0f };
+            // Mesh ID for a leaf node
+            uint32_t mesh_id = kInvalidId;
+            // Right AABB min or vertex 2 for a leaf node
+            float aabb_right_min_or_v2[3] = { 0.0f, 0.0f, 0.0f };
+            // Right child node address
+            uint32_t addr_right = kInvalidId;
+            // Left AABB max
+            float aabb_right_max[3] = { 0.0f, 0.0f, 0.0f };
+            // Primitive ID for a leaf node
+            uint32_t prim_id = kInvalidId;
+        };
+
+        struct Bvh2::Triangle
+        {
+            float3 v0;
+            float3 v1;
+            float3 v2;
+        };
+
+        struct Bvh2::EpoData
+        {
+            float aabb_max[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+            float aabb_min[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        };
 
     private:
         Bvh2(const Bvh2 &) = delete;
@@ -178,29 +221,13 @@ namespace RadeonRays
 
         // Buffer of encoded nodes
         Node *m_nodes;
+
+        EpoData *m_epoDatas;
+
         // Number of encoded nodes
         std::size_t m_nodecount;
-    };
-
-    // Encoded node format
-    struct Bvh2::Node
-    {
-        // Left AABB min or vertex 0 for a leaf node
-        float aabb_left_min_or_v0[3] = { 0.0f, 0.0f, 0.0f };
-        // Left child node address
-        uint32_t addr_left = kInvalidId;
-        // Left AABB max or vertex 1 for a leaf node
-        float aabb_left_max_or_v1[3] = { 0.0f, 0.0f, 0.0f };
-        // Mesh ID for a leaf node
-        uint32_t mesh_id = kInvalidId;
-        // Right AABB min or vertex 2 for a leaf node
-        float aabb_right_min_or_v2[3] = { 0.0f, 0.0f, 0.0f };
-        // Right child node address
-        uint32_t addr_right = kInvalidId;
-        // Left AABB max
-        float aabb_right_max[3] = { 0.0f, 0.0f, 0.0f };
-        // Primitive ID for a leaf node
-        uint32_t prim_id = kInvalidId;
+        // Tree Depth
+        uint32_t m_depth;
     };
 
     template <typename Iter>
@@ -368,6 +395,23 @@ namespace RadeonRays
         node.prim_id = static_cast<std::uint32_t>(ref.second);
     }
 
+    void Bvh2::SetPrimitive(
+        EpoData &epoData,
+        std::pair<const Shape *, std::size_t> ref)
+    {
+        auto shape = ref.first;
+        matrix worldmat, worldmatinv;
+        shape->GetTransform(worldmat, worldmatinv);
+        auto mesh = static_cast<const Mesh *>(static_cast<const ShapeImpl *>(shape)->is_instance() ? static_cast<const Instance *>(shape)->GetBaseShape() : shape);
+        auto face = mesh->GetFaceData()[ref.second];
+
+        /*
+        epoData.prims.push_back({
+            transform_point(mesh->GetVertexData()[face.idx[0]], worldmat),
+            transform_point(mesh->GetVertexData()[face.idx[1]], worldmat),
+            transform_point(mesh->GetVertexData()[face.idx[2]], worldmat)});*/
+    }
+
     bool Bvh2::IsInternal(const Node &node)
     {
         return node.addr_left != kInvalidId;
@@ -407,8 +451,8 @@ namespace RadeonRays
 
                 // If the child is internal node itself we pull it
                 // up the tree into its parent. If the child node is
-                // a leaf, then we do not have AABB for it (we store 
-                // vertices directly in the leaf), so we calculate 
+                // a leaf, then we do not have AABB for it (we store
+                // vertices directly in the leaf), so we calculate
                 // AABB on the fly.
                 if (IsInternal(*child0))
                 {
@@ -455,8 +499,8 @@ namespace RadeonRays
 
                 // If the child is internal node itself we pull it
                 // up the tree into its parent. If the child node is
-                // a leaf, then we do not have AABB for it (we store 
-                // vertices directly in the leaf), so we calculate 
+                // a leaf, then we do not have AABB for it (we store
+                // vertices directly in the leaf), so we calculate
                 // AABB on the fly.
                 if (IsInternal(*child1))
                 {

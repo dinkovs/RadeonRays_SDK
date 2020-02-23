@@ -102,7 +102,8 @@ namespace Calc
 
         // Execution
         // Calls are blocking if passed nullptr for an event, otherwise use Event to sync
-        virtual void Execute(Function const* func, std::uint32_t queue, size_t global_size, size_t local_size, Event** e) = 0;
+        virtual float Execute(Function const* func, std::uint32_t queue, size_t global_size, size_t local_size, Event** e) = 0;
+        virtual float Execute(Function const* func, std::uint32_t queue, size_t global_size, Event** e) = 0;
 
         // Events handling
         virtual void WaitForEvent(Event* e) = 0;
