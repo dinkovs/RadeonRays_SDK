@@ -33,8 +33,16 @@ THE SOFTWARE.
 #include <math.h>       /* fma, FP_FAST_FMA */'
 #include <queue>
 
+
+#include <chrono>
+using namespace std::chrono;
+
+#define SINGLE_TRIANGLE 0
+#define SINGLE_BOX 0
+#define PRINT_TREE 0
 #define SERIALIZE_RAYS 1
 #define PROFILE_TRAVERSAL 1
+
 
 struct Stats
 {
@@ -448,12 +456,32 @@ namespace RadeonRays
         if (device->GetPlatform() == Calc::Platform::kOpenCL)
         {
 #if SERIALIZE_RAYS
+#if BVH3
+            m_gpudata->serial_prog.executable = m_device->CompileExecutable(g_intersect_bvh3_lds_serial_opencl, std::strlen(g_intersect_bvh3_lds_serial_opencl), buildopts.c_str());
+#else
             m_gpudata->serial_prog.executable = m_device->CompileExecutable(g_intersect_bvh2_lds_serial_opencl, std::strlen(g_intersect_bvh2_lds_serial_opencl), buildopts.c_str());
+#endif
 #if PROFILE_TRAVERSAL
+#if BVH3
+            m_gpudata->profiling_prog.executable = m_device->CompileExecutable(g_intersect_bvh3_lds_profiling_opencl, std::strlen(g_intersect_bvh3_lds_profiling_opencl), buildopts.c_str());
+#else
             m_gpudata->profiling_prog.executable = m_device->CompileExecutable(g_intersect_bvh2_lds_profiling_opencl, std::strlen(g_intersect_bvh2_lds_profiling_opencl), buildopts.c_str());
 #endif
 #endif
-            m_gpudata->bvh_prog.executable = m_device->CompileExecutable(g_intersect_bvh2_lds_opencl, std::strlen(g_intersect_bvh2_lds_opencl), buildopts.c_str());
+#endif
+            m_gpudata->bvh_prog.executable = m_device->CompileExecutable(
+#if SINGLE_TRIANGLE
+                g_intersect_bvh2_lds_opencl_single_triangle, std::strlen(g_intersect_bvh2_lds_opencl_single_triangle),
+#elif SINGLE_BOX
+                g_intersect_bvh2_lds_opencl_single_box, std::strlen(g_intersect_bvh2_lds_opencl_single_box),
+#else
+#if BVH3
+                g_intersect_bvh3_lds_opencl, std::strlen(g_intersect_bvh3_lds_opencl),
+#else
+                g_intersect_bvh2_lds_opencl, std::strlen(g_intersect_bvh2_lds_opencl),
+#endif
+#endif
+                buildopts.c_str());
             if (spec.has_fp16)
                 m_gpudata->qbvh_prog.executable = m_device->CompileExecutable(g_intersect_bvh2_lds_fp16_opencl, std::strlen(g_intersect_bvh2_lds_fp16_opencl), buildopts.c_str());
         }
@@ -487,9 +515,9 @@ namespace RadeonRays
         }
     }
 
-    void IntersectorLDS::GetEPO(float* epo, uint32_t comp, uint32_t current, Bvh2* tree, bool totalSum) const
+    void IntersectorLDS::GetEPO(float* epo, uint32_t comp, uint32_t current, BvhX* tree, bool totalSum) const
     {
-        Bvh2::Node& currentNode = tree->m_nodes[current];
+        BvhX::Node& currentNode = tree->m_nodes[current];
 
         Math::AABB currentBounds = { {tree->m_epoDatas[current].aabb_min[0], tree->m_epoDatas[current].aabb_min[1], tree->m_epoDatas[current].aabb_min[2]},
                                      {tree->m_epoDatas[current].aabb_max[0], tree->m_epoDatas[current].aabb_max[1], tree->m_epoDatas[current].aabb_max[2]} };
@@ -498,13 +526,24 @@ namespace RadeonRays
 
         if ((totalSum || current != comp) && AabbAabbIntersect(currentBounds, compBounds))
         {
-            if (!Bvh2::IsInternal(currentNode))
+            if (!BvhX::IsInternal(currentNode))
             {
                 Math::Triangle tri = { {currentNode.aabb_left_min_or_v0[0], currentNode.aabb_left_min_or_v0[1], currentNode.aabb_left_min_or_v0[2]},
                                        {currentNode.aabb_left_max_or_v1[0], currentNode.aabb_left_max_or_v1[1], currentNode.aabb_left_max_or_v1[2]},
                                        {currentNode.aabb_right_min_or_v2[0], currentNode.aabb_right_min_or_v2[1], currentNode.aabb_right_min_or_v2[2]} };
 
                 *epo += AabbTriIntersectArea(compBounds, tri);
+
+#if BVH3
+                if (currentNode.prim_id2 != BvhX::Constants::kInvalidId)
+                {
+                    tri = { {currentNode.aabb_right_max_or_v3[0], currentNode.aabb_right_max_or_v3[1], currentNode.aabb_right_max_or_v3[2]},
+                            {currentNode.aabb_mid_min_or_v4[0], currentNode.aabb_mid_min_or_v4[1], currentNode.aabb_mid_min_or_v4[2]},
+                            {currentNode.aabb_mid_max_or_v5[0], currentNode.aabb_mid_max_or_v5[1], currentNode.aabb_mid_max_or_v5[2]} };
+
+                    *epo += AabbTriIntersectArea(compBounds, tri);
+                }
+#endif
 
                 if (isnan(abs(*epo)))
                 {
@@ -514,9 +553,29 @@ namespace RadeonRays
             else
             {
                 GetEPO(epo, comp, currentNode.addr_left, tree, totalSum);
+#if BVH3
+                GetEPO(epo, comp, currentNode.addr_mid_mesh_id2, tree, totalSum);
+#endif
                 GetEPO(epo, comp, currentNode.addr_right, tree, totalSum);
             }
         }
+    }
+
+    inline
+        float mm_select(__m128 v, std::uint32_t index)
+    {
+        _MM_ALIGN16 float temp[4];
+        _mm_store_ps(temp, v);
+        return temp[index];
+    }
+
+    inline
+        __m128 aabb_surface_area(__m128 pmin, __m128 pmax)
+    {
+        auto ext = _mm_sub_ps(pmax, pmin);
+        auto xxy = _mm_shuffle_ps(ext, ext, _MM_SHUFFLE(3, 1, 0, 0));
+        auto yzz = _mm_shuffle_ps(ext, ext, _MM_SHUFFLE(3, 2, 2, 1));
+        return _mm_mul_ps(_mm_dp_ps(xxy, yzz, 0xff), _mm_set_ps(2.f, 2.f, 2.f, 2.f));
     }
 
     void IntersectorLDS::Process(const World &world)
@@ -559,8 +618,11 @@ namespace RadeonRays
             }
 
             // Create the bvh
-            Bvh2 bvh(traversal_cost, num_bins, use_sah);
+            BvhX bvh(traversal_cost, num_bins, use_sah);
+
+            auto beginTime = high_resolution_clock::now();
             bvh.Build(world.shapes_.begin(), world.shapes_.end());
+            std::cout << duration_cast<microseconds>(high_resolution_clock::now() - beginTime).count() << std::endl;
 
             // Upload BVH data to GPU memory
             if (!use_qbvh)
@@ -570,7 +632,7 @@ namespace RadeonRays
 
                 // Get the pointer to mapped data
                 Calc::Event *e = nullptr;
-                Bvh2::Node *bvhdata = nullptr;
+                BvhX::Node *bvhdata = nullptr;
 
                 m_device->MapBuffer(m_gpudata->bvh, 0, 0, bvh_size_in_bytes, Calc::MapType::kMapWrite, (void **)&bvhdata, &e);
 
@@ -597,28 +659,77 @@ namespace RadeonRays
                 m_device->DeleteEvent(e);
 #endif
 
+#if PRINT_TREE
+#if BVH3
+                printf("===============BVH3==============\n");
+#else
+                printf("===============BVH2==============\n");
+#endif
+#endif
+
                 // Copy BVH data
                 for (std::size_t i = 0; i < bvh.m_nodecount; ++i)
                 {
-                    bvhdata[i] = bvh.m_nodes[i];
+                    RadeonRays::BvhX::Node& node = bvh.m_nodes[i];
+#if BVH3
+                    if (Bvh3::IsValid(node))
+                    {
+#endif
+#if PRINT_TREE
+#if BVH3
+                        printf("#%ull: \tlevel - n/a, \tleft_addr - %u, \tmid_addr - %u, right_addr - %u, \tprim_id - %u, \tprim_id2%u\n",
+                            i, /*myData.level,*/ node.addr_left, node.addr_mid_mesh_id2, node.addr_right, node.prim_id, node.prim_id2);
+                        printf(" aabb_min_left: x - %f y - %f z - %f \n",
+                            node.aabb_left_min_or_v0[0], node.aabb_left_min_or_v0[1], node.aabb_left_min_or_v0[2]);
+                        printf(" aabb_max_left: x - %f y - %f z - %f \n",
+                            node.aabb_left_max_or_v1[0], node.aabb_left_max_or_v1[1], node.aabb_left_max_or_v1[2]);
+                        printf(" aabb_min_min: x - %f y - %f z - %f \n",
+                            node.aabb_mid_min_or_v4[0], node.aabb_mid_min_or_v4[1], node.aabb_mid_min_or_v4[2]);
+                        printf(" aabb_max_min: x - %f y - %f z - %f \n",
+                            node.aabb_mid_max_or_v5[0], node.aabb_mid_max_or_v5[1], node.aabb_mid_max_or_v5[2]);
+                        printf(" aabb_min_right: x - %f y - %f z - %f \n",
+                            node.aabb_right_min_or_v2[0], node.aabb_right_min_or_v2[1], node.aabb_right_min_or_v2[2]);
+                        printf(" aabb_max_right: x - %f y - %f z - %f \n\n",
+                            node.aabb_right_max_or_v3[0], node.aabb_right_max_or_v3[1], node.aabb_right_max_or_v3[2]);
+#else
+                        printf("#%u: \tlevel - %u, \tleft_addr - %u, \tright_addr - %u, \tprim_id - %u\n",
+                            i, myData.level, node.addr_left, node.addr_right, node.prim_id);
+#endif
+#endif
+
+                        bvhdata[i] = bvh.m_nodes[i];
 
 #if PROFILE_TRAVERSAL
-                    GetEPO(&epodata[2 * i], i, 0, &bvh);
-                    GetEPO(&epodata[(2 * i) + 1], i, 0, &bvh, true);
+                        GetEPO(&epodata[2 * i], i, 0, &bvh);
+                        GetEPO(&epodata[(2 * i) + 1], i, 0, &bvh, true);
 
-                    float length = bvh.m_epoDatas[i].aabb_max[0] - bvh.m_epoDatas[i].aabb_min[0];
-                    float width = bvh.m_epoDatas[i].aabb_max[1] - bvh.m_epoDatas[i].aabb_min[1];
-                    float height = bvh.m_epoDatas[i].aabb_max[2] - bvh.m_epoDatas[i].aabb_min[2];
+                        float length = bvh.m_epoDatas[i].aabb_max[0] - bvh.m_epoDatas[i].aabb_min[0];
+                        float width = bvh.m_epoDatas[i].aabb_max[1] - bvh.m_epoDatas[i].aabb_min[1];
+                        float height = bvh.m_epoDatas[i].aabb_max[2] - bvh.m_epoDatas[i].aabb_min[2];
 
-                    sadata[i] = (2 * (length * width)) + (2 * (length * height)) + (2 * (height * width));
+                        sadata[i] = (2 * (length * width)) + (2 * (length * height)) + (2 * (height * width));
 
-                    if (!Bvh2::IsInternal(bvh.m_nodes[i]))
-                    {
-                        Math::Triangle tri = { {bvh.m_nodes[i].aabb_left_min_or_v0[0], bvh.m_nodes[i].aabb_left_min_or_v0[1], bvh.m_nodes[i].aabb_left_min_or_v0[2]},
-                                               {bvh.m_nodes[i].aabb_left_max_or_v1[0], bvh.m_nodes[i].aabb_left_max_or_v1[1], bvh.m_nodes[i].aabb_left_max_or_v1[2]},
-                                               {bvh.m_nodes[i].aabb_right_min_or_v2[0], bvh.m_nodes[i].aabb_right_min_or_v2[1], bvh.m_nodes[i].aabb_right_min_or_v2[2]} };
+                        if (!BvhX::IsInternal(bvh.m_nodes[i]))
+                        {
+                            Math::Triangle tri = { {bvh.m_nodes[i].aabb_left_min_or_v0[0], bvh.m_nodes[i].aabb_left_min_or_v0[1], bvh.m_nodes[i].aabb_left_min_or_v0[2]},
+                                                   {bvh.m_nodes[i].aabb_left_max_or_v1[0], bvh.m_nodes[i].aabb_left_max_or_v1[1], bvh.m_nodes[i].aabb_left_max_or_v1[2]},
+                                                   {bvh.m_nodes[i].aabb_right_min_or_v2[0], bvh.m_nodes[i].aabb_right_min_or_v2[1], bvh.m_nodes[i].aabb_right_min_or_v2[2]} };
 
-                        m_totalArea += (tri.v0 - tri.v1).Cross((tri.v2 - tri.v1)).Magnitude() / 2.0f;
+                            m_totalArea += (tri.v0 - tri.v1).Cross((tri.v2 - tri.v1)).Magnitude() / 2.0f;
+
+#if BVH3
+                            if (bvh.m_nodes[i].prim_id2 != BvhX::Constants::kInvalidId)
+                            {
+                                tri = { {bvh.m_nodes[i].aabb_right_max_or_v3[0], bvh.m_nodes[i].aabb_right_max_or_v3[1], bvh.m_nodes[i].aabb_right_max_or_v3[2]},
+                                        {bvh.m_nodes[i].aabb_mid_min_or_v4[0], bvh.m_nodes[i].aabb_mid_min_or_v4[1], bvh.m_nodes[i].aabb_mid_min_or_v4[2]},
+                                        {bvh.m_nodes[i].aabb_mid_max_or_v5[0], bvh.m_nodes[i].aabb_mid_max_or_v5[1], bvh.m_nodes[i].aabb_mid_max_or_v5[2]} };
+
+                                m_totalArea += (tri.v0 - tri.v1).Cross((tri.v2 - tri.v1)).Magnitude() / 2.0f;
+                            }
+#endif
+                        }
+#endif
+#if BVH3
                     }
 #endif
                 }
@@ -632,7 +743,7 @@ namespace RadeonRays
 #if PROFILE_TRAVERSAL
                 char filename[1024];
                 memset(filename, 0, 1024);
-                strcat(filename, "C:\\git\\RadeonProRender-Baikal\\build\\");
+                strcat(filename, "C:\\git\\Baikal_Mine\\build\\");
                 strcat(filename, getenv("BAIKAL_MODEL_NAME"));
 
                 char* comma = strstr(filename, ",");
@@ -664,12 +775,14 @@ namespace RadeonRays
                 e->Wait();
                 m_device->DeleteEvent(e);
 #endif
+                std::cout << "level count: " << bvh.m_levelcount << std::endl;
 
                 // Select intersection program
                 m_gpudata->prog = &m_gpudata->bvh_prog;
             }
             else
             {
+#if !BVH3
                 QBvhTranslator translator;
                 translator.Process(bvh);
 
@@ -699,6 +812,7 @@ namespace RadeonRays
 
                 // Select intersection program
                 m_gpudata->prog = &m_gpudata->qbvh_prog;
+#endif
             }
 
             // Make sure everything is committed
@@ -790,7 +904,7 @@ namespace RadeonRays
 
         char filename[1024];
         memset(filename, 0, 1024);
-        strcat(filename, "C:\\git\\RadeonProRender-Baikal\\build\\");
+        strcat(filename, "C:\\git\\Baikal_Mine\\build\\");
         strcat(filename, getenv("BAIKAL_MODEL_NAME"));
 
         char* comma = strstr(filename, ",");

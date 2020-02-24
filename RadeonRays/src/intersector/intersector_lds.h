@@ -24,7 +24,16 @@ THE SOFTWARE.
 #include "calc.h"
 #include "device.h"
 #include "intersector.h"
+
+#define BVH3 1
+
+#if BVH3
+#define BvhX Bvh3
+#include "../accelerator/bvh3.h"
+#else
+#define BvhX Bvh2
 #include "../accelerator/bvh2.h"
+#endif
 
 namespace RadeonRays
 {
@@ -48,7 +57,7 @@ namespace RadeonRays
             std::uint32_t max_rays, Calc::Buffer *hits,
             const Calc::Event *wait_event, Calc::Event **event) const override;
 
-        void GetEPO(float* epo, uint32_t comp, uint32_t current, Bvh2* tree, bool totalSum = false) const;
+        void GetEPO(float* epo, uint32_t comp, uint32_t current, BvhX* tree, bool totalSum = false) const;
 
 
     private:

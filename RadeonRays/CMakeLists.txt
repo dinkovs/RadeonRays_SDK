@@ -19,6 +19,8 @@ set(ACCELERATOR_SOURCES
     src/accelerator/bvh.h
     src/accelerator/bvh2.cpp
     src/accelerator/bvh2.h
+    src/accelerator/bvh3.cpp
+    src/accelerator/bvh3.h
     src/accelerator/hlbvh.cpp
     src/accelerator/hlbvh.h
     src/accelerator/split_bvh.cpp
