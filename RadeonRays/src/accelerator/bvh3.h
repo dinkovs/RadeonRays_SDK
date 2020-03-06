@@ -79,7 +79,11 @@ namespace RadeonRays
             // Invalid index marker
             kInvalidId = 0xffffffffu,
             // Max triangles per leaf
+#if FORCE_3CHILD
             kMaxLeafPrimitives = 2u,
+#else
+            kMaxLeafPrimitives = 1u,
+#endif
             // Threshold number of primitives to disable SAH split
             kMinSAHPrimitives = 8u,
             // Maximum stack size for non-parallel builds
@@ -500,15 +504,12 @@ namespace RadeonRays
                 auto idx1 = GetChildIndex(*node, 1);
                 auto idx2 = GetChildIndex(*node, 2);
 
-                auto child0 = &bvh.m_nodes[idx0];
-                auto child1 = &bvh.m_nodes[idx1];
-                auto child2 = &bvh.m_nodes[idx2];
-
                 // If the child is internal node itself we pull it
                 // up the tree into its parent. If the child node is
                 // a leaf, then we do not have AABB for it (we store
                 // vertices directly in the leaf), so we calculate
                 // AABB on the fly.
+                auto child0 = &bvh.m_nodes[idx0];
                 if (IsInternal(*child0))
                 {
                     node->aabb_left_min_or_v0[0] = child0->aabb_left_min_or_v0[0] - delta;
@@ -545,6 +546,7 @@ namespace RadeonRays
                 // a leaf, then we do not have AABB for it (we store
                 // vertices directly in the leaf), so we calculate
                 // AABB on the fly.
+                auto child1 = &bvh.m_nodes[idx1];
                 if (IsInternal(*child1))
                 {
                     node->aabb_mid_min_or_v4[0] = child1->aabb_left_min_or_v0[0] - delta;
@@ -581,35 +583,39 @@ namespace RadeonRays
                 // a leaf, then we do not have AABB for it (we store
                 // vertices directly in the leaf), so we calculate
                 // AABB on the fly.
-                if (IsInternal(*child2))
+                if (idx2 != kInvalidId)
                 {
-                    node->aabb_right_min_or_v2[0] = child2->aabb_left_min_or_v0[0] - delta;
-                    node->aabb_right_min_or_v2[1] = child2->aabb_left_min_or_v0[1] - delta;
-                    node->aabb_right_min_or_v2[2] = child2->aabb_left_min_or_v0[2] - delta;
-                    node->aabb_right_max_or_v3[0] = child2->aabb_left_max_or_v1[0] + delta;
-                    node->aabb_right_max_or_v3[1] = child2->aabb_left_max_or_v1[1] + delta;
-                    node->aabb_right_max_or_v3[2] = child2->aabb_left_max_or_v1[2] + delta;
-                    s.push(idx2);
-                }
-                else
-                {
-                    node->aabb_right_min_or_v2[0] =
-                        GetMinVertexComponent(*child2, 0) - delta;
+                    auto child2 = &bvh.m_nodes[idx2];
+                    if (IsInternal(*child2))
+                    {
+                        node->aabb_right_min_or_v2[0] = child2->aabb_left_min_or_v0[0] - delta;
+                        node->aabb_right_min_or_v2[1] = child2->aabb_left_min_or_v0[1] - delta;
+                        node->aabb_right_min_or_v2[2] = child2->aabb_left_min_or_v0[2] - delta;
+                        node->aabb_right_max_or_v3[0] = child2->aabb_left_max_or_v1[0] + delta;
+                        node->aabb_right_max_or_v3[1] = child2->aabb_left_max_or_v1[1] + delta;
+                        node->aabb_right_max_or_v3[2] = child2->aabb_left_max_or_v1[2] + delta;
+                        s.push(idx2);
+                    }
+                    else
+                    {
+                        node->aabb_right_min_or_v2[0] =
+                            GetMinVertexComponent(*child2, 0) - delta;
 
-                    node->aabb_right_min_or_v2[1] =
-                        GetMinVertexComponent(*child2, 1) - delta;
+                        node->aabb_right_min_or_v2[1] =
+                            GetMinVertexComponent(*child2, 1) - delta;
 
-                    node->aabb_right_min_or_v2[2] =
-                        GetMinVertexComponent(*child2, 2) - delta;
+                        node->aabb_right_min_or_v2[2] =
+                            GetMinVertexComponent(*child2, 2) - delta;
 
-                    node->aabb_right_max_or_v3[0] =
-                        GetMaxVertexComponent(*child2, 0) + delta;
+                        node->aabb_right_max_or_v3[0] =
+                            GetMaxVertexComponent(*child2, 0) + delta;
 
-                    node->aabb_right_max_or_v3[1] =
-                        GetMaxVertexComponent(*child2, 1) + delta;
+                        node->aabb_right_max_or_v3[1] =
+                            GetMaxVertexComponent(*child2, 1) + delta;
 
-                    node->aabb_right_max_or_v3[2] =
-                        GetMaxVertexComponent(*child2, 2) + delta;
+                        node->aabb_right_max_or_v3[2] =
+                            GetMaxVertexComponent(*child2, 2) + delta;
+                    }
                 }
             }
         }

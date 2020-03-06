@@ -24,6 +24,7 @@ THE SOFTWARE.
 #include <atomic>
 #include <mutex>
 #include <numeric>
+#include <algorithm>
 
 #define PARALLEL_BUILD
 
@@ -160,7 +161,11 @@ namespace RadeonRays
         RefArray refs(num_aabbs);
         std::iota(refs.begin(), refs.end(), 0);
 
+#if FORCE_3CHILD
         m_nodecount = (3 * ((num_aabbs + 1) / 2)) - 2;
+#else
+        m_nodecount = (2 * num_aabbs) - 1;
+#endif
         m_nodes = reinterpret_cast<Node*>(
             Allocate(sizeof(Node) * m_nodecount, 16u));
 
@@ -306,13 +311,19 @@ namespace RadeonRays
                         requests.push(request_right);
                         cv.notify_one();
                     }
-                    else
+                    else if (request_right.num_refs > 0)
                     {
                         local_requests.push(request_right);
                     }
 
-                    local_requests.push(request_left);
-                    local_requests.push(request_mid);
+                    if (request_left.num_refs > 0)
+                    {
+                        local_requests.push(request_left);
+                    }
+                    if (request_mid.num_refs > 0)
+                    {
+                        local_requests.push(request_mid);
+                    }
                 }
             }
         };
@@ -758,11 +769,21 @@ namespace RadeonRays
             split_idxs[1] = first;
         }
 
+#if FORCE_3CHILD
         if (split_idxs[0] == request.start_index ||
             split_idxs[0] == request.start_index + request.num_refs ||
             split_idxs[1] == request.start_index ||
             split_idxs[1] == request.start_index + request.num_refs ||
             split_idxs[0] == split_idxs[1])
+#else
+        uint32_t left_ref_count = split_idxs[0] - request.start_index;
+        uint32_t mid_ref_count = split_idxs[1] - split_idxs[0];
+        uint32_t right_ref_count = (request.num_refs - left_ref_count) - mid_ref_count;
+
+        if (left_ref_count == request.num_refs ||
+            mid_ref_count == request.num_refs ||
+            right_ref_count == request.num_refs)
+#endif
         {
             split_idxs[0] = request.start_index + (request.num_refs / 3);
             split_idxs[1] = request.start_index + ((request.num_refs * 2) / 3);
@@ -832,7 +853,11 @@ namespace RadeonRays
         request_mid.start_index = split_idxs[0];
         request_mid.num_refs = split_idxs[1] - split_idxs[0];
         request_mid.level = request.level + 1;
+#if FORCE_3CHILD
         request_mid.index = static_cast<std::uint32_t>(request_left.index + ((3 * ((request_left.num_refs + 1) / 2)) - 2));
+#else
+        request_mid.index = static_cast<std::uint32_t>(request_left.index + (request_left.num_refs == 0 ? 0ull : 2 * (request_left.num_refs) - 1, 0ull));
+#endif
 
         request_right.aabb_min = rmin;
         request_right.aabb_max = rmax;
@@ -841,11 +866,16 @@ namespace RadeonRays
         request_right.start_index = split_idxs[1];
         request_right.num_refs = (request.num_refs - request_left.num_refs) - request_mid.num_refs;
         request_right.level = request.level + 1;
+#if FORCE_3CHILD
         request_right.index = static_cast<std::uint32_t>(request_mid.index + ((3 * ((request_mid.num_refs + 1) / 2)) - 2));
+#else
+        request_right.index = static_cast<std::uint32_t>(request_mid.index + (request_mid.num_refs == 0 ? 0ull : 2 * (request_mid.num_refs) - 1, 0ull));
+#endif
 
         uint32_t next_level = request_right.level;
         uint32_t local_level_count = m_levelcount;
 
+        /*
         while (local_level_count < next_level)
         {
             m_levelcount.compare_exchange_weak(local_level_count, next_level, )
@@ -859,9 +889,10 @@ namespace RadeonRays
                     return false; // swap failed
                 }
         }
+        */
 
 
-        m_levelcount.com
+        //m_levelcount.com
 
         if (m_levelcount < request_right.level)
         {
@@ -869,13 +900,46 @@ namespace RadeonRays
         }
 
         // Create internal node
-        EncodeInternal(
-            m_nodes[request.index],
-            request.aabb_min,
-            request.aabb_max,
-            request_left.index,
-            request_mid.index,
-            request_right.index);
+        if (request_left.num_refs == 0)
+        {
+            EncodeInternal(
+                m_nodes[request.index],
+                request.aabb_min,
+                request.aabb_max,
+                request_mid.index,
+                request_right.index,
+                kInvalidId);
+        }
+        else if (request_mid.num_refs == 0)
+        {
+            EncodeInternal(
+                m_nodes[request.index],
+                request.aabb_min,
+                request.aabb_max,
+                request_left.index,
+                request_right.index,
+                kInvalidId);
+        }
+        else if (request_right.num_refs == 0)
+        {
+            EncodeInternal(
+                m_nodes[request.index],
+                request.aabb_min,
+                request.aabb_max,
+                request_left.index,
+                request_mid.index,
+                kInvalidId);
+        }
+        else
+        {
+            EncodeInternal(
+                m_nodes[request.index],
+                request.aabb_min,
+                request.aabb_max,
+                request_left.index,
+                request_mid.index,
+                request_right.index);
+        }
 
         return kInternal;
     }

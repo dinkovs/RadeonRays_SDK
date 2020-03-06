@@ -40,8 +40,8 @@ using namespace std::chrono;
 #define SINGLE_TRIANGLE 0
 #define SINGLE_BOX 0
 #define PRINT_TREE 0
-#define SERIALIZE_RAYS 1
-#define PROFILE_TRAVERSAL 1
+#define SERIALIZE_RAYS 0
+#define PROFILE_TRAVERSAL 0
 
 
 struct Stats
