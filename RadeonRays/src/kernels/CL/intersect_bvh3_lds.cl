@@ -121,16 +121,19 @@ KERNEL void intersect_main(
 
             // Intersection parametric distance
             float closest_t = my_ray.o.w;
-            
+#if FORCE_3CHILD
             float3 closest_v0 = {0.0f, 0.0f, 0.0f};
             float3 closest_v1 = {0.0f, 0.0f, 0.0f};
             float3 closest_v2 = {0.0f, 0.0f, 0.0f};
+#endif
 
             // Current node address
             uint addr = 0;
             // Current closest address
             uint closest_addr = INVALID_ADDR;
+#if FORCE_3CHILD
             uint prim_idx = 0;
+#endif
 
             uint stack_bottom = STACK_SIZE * index;
             uint sptr = stack_bottom;
@@ -220,6 +223,7 @@ KERNEL void intersect_main(
                         {
                             closest_t = t;
                             closest_addr = addr;
+#if FORCE_3CHILD
                             prim_idx = 0;
                             closest_v0 = node.aabb_left_min_or_v0_and_addr_left.xyz;
 							closest_v1 = node.aabb_left_max_or_v1_and_mesh_id.xyz;
@@ -244,6 +248,7 @@ KERNEL void intersect_main(
 								closest_v1 = node.aabb_mid_min_or_v4_and_addr_mid_mesh_id2.xyz;
 								closest_v2 = node.aabb_mid_max_or_v5_and_prim_id2.xyz;
 							}
+#endif
                         }
 #ifdef RR_RAY_MASK
                     }
@@ -275,11 +280,18 @@ KERNEL void intersect_main(
                 // Calculate barycentric coordinates
                 const float2 uv = triangle_calculate_barycentrics(
                     p,
+#if FORCE_3CHILD
                     closest_v0,
                     closest_v1,
                     closest_v2);
+#else
+                    node.aabb_left_min_or_v0_and_addr_left.xyz,
+                    node.aabb_left_max_or_v1_and_mesh_id.xyz,
+                    node.aabb_right_min_or_v2_and_addr_right.xyz);
+#endif
 
                 // Update hit information
+#if FORCE_3CHILD
                 if (prim_idx == 0)
                 {
                     hits[index].prim_id = GetPrimId(node);
@@ -290,6 +302,10 @@ KERNEL void intersect_main(
                     hits[index].prim_id = GetPrimId2(node);
                     hits[index].shape_id = GetMeshId2(node);
                 }
+#else
+                hits[index].prim_id = GetPrimId(node);
+                hits[index].shape_id = GetMeshId(node);
+#endif
                 hits[index].uvwt = (float4)(uv.x, uv.y, 0.0f, closest_t);
             }
             else
@@ -423,6 +439,7 @@ KERNEL void occluded_main(
                         {
                             hits[index] = HIT_MARKER;
                             return;
+#if FORCE_3CHILD
                         }
                         
                         if (GetPrimId2(node) != INVALID_ADDR)
@@ -439,6 +456,7 @@ KERNEL void occluded_main(
 							    hits[index] = HIT_MARKER;
 							    return;
 							}
+#endif
                         }
 #ifdef RR_RAY_MASK
                     }

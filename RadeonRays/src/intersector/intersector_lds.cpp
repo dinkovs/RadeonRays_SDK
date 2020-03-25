@@ -556,7 +556,8 @@ namespace RadeonRays
 #if BVH3
                 GetEPO(epo, comp, currentNode.addr_mid_mesh_id2, tree, totalSum);
 #endif
-                GetEPO(epo, comp, currentNode.addr_right, tree, totalSum);
+                if (currentNode.addr_right != tree->kInvalidId)
+                     GetEPO(epo, comp, currentNode.addr_right, tree, totalSum);
             }
         }
     }
@@ -671,6 +672,24 @@ namespace RadeonRays
                 for (std::size_t i = 0; i < bvh.m_nodecount; ++i)
                 {
                     RadeonRays::BvhX::Node& node = bvh.m_nodes[i];
+
+#if !BVH3
+                    if (Bvh2::IsInternal(node))
+                    {
+                        node.mesh_id_or_internal_flags = 0;
+
+                        Math::AABB aabbLeft = { {node.aabb_left_min_or_v0[0], node.aabb_left_min_or_v0[1], node.aabb_left_min_or_v0[2]},
+                                                {node.aabb_left_max_or_v1[0], node.aabb_left_max_or_v1[1], node.aabb_left_max_or_v1[2]} };
+                        Math::AABB aabbRight = { {node.aabb_right_min_or_v2[0], node.aabb_right_min_or_v2[1], node.aabb_right_min_or_v2[2]},
+                                                 {node.aabb_right_max[0], node.aabb_right_max[1], node.aabb_right_max[2]} };
+
+                        if (AabbAabbIntersect(aabbLeft, aabbRight))
+                        {
+                            node.mesh_id_or_internal_flags |= 1;
+                        }
+                    }
+#endif
+
 #if BVH3
                     if (Bvh3::IsValid(node))
                     {
@@ -775,7 +794,7 @@ namespace RadeonRays
                 e->Wait();
                 m_device->DeleteEvent(e);
 #endif
-                std::cout << "level count: " << bvh.m_levelcount << std::endl;
+                //std::cout << "level count: " << bvh.m_levelcount << std::endl;
 
                 // Select intersection program
                 m_gpudata->prog = &m_gpudata->bvh_prog;

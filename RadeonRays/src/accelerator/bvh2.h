@@ -188,7 +188,7 @@ namespace RadeonRays
             // Left AABB max or vertex 1 for a leaf node
             float aabb_left_max_or_v1[3] = { 0.0f, 0.0f, 0.0f };
             // Mesh ID for a leaf node
-            uint32_t mesh_id = kInvalidId;
+            uint32_t mesh_id_or_internal_flags = kInvalidId;
             // Right AABB min or vertex 2 for a leaf node
             float aabb_right_min_or_v2[3] = { 0.0f, 0.0f, 0.0f };
             // Right child node address
@@ -391,7 +391,7 @@ namespace RadeonRays
         node.aabb_right_min_or_v2[0] = v2.x;
         node.aabb_right_min_or_v2[1] = v2.y;
         node.aabb_right_min_or_v2[2] = v2.z;
-        node.mesh_id = shape->GetId();
+        node.mesh_id_or_internal_flags = shape->GetId();
         node.prim_id = static_cast<std::uint32_t>(ref.second);
     }
 

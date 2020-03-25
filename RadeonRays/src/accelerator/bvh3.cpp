@@ -856,7 +856,7 @@ namespace RadeonRays
 #if FORCE_3CHILD
         request_mid.index = static_cast<std::uint32_t>(request_left.index + ((3 * ((request_left.num_refs + 1) / 2)) - 2));
 #else
-        request_mid.index = static_cast<std::uint32_t>(request_left.index + (request_left.num_refs == 0 ? 0ull : 2 * (request_left.num_refs) - 1, 0ull));
+        request_mid.index = static_cast<std::uint32_t>(request_left.index + (request_left.num_refs == 0 ? 0ull : 2 * (request_left.num_refs) - 1));
 #endif
 
         request_right.aabb_min = rmin;
@@ -869,7 +869,7 @@ namespace RadeonRays
 #if FORCE_3CHILD
         request_right.index = static_cast<std::uint32_t>(request_mid.index + ((3 * ((request_mid.num_refs + 1) / 2)) - 2));
 #else
-        request_right.index = static_cast<std::uint32_t>(request_mid.index + (request_mid.num_refs == 0 ? 0ull : 2 * (request_mid.num_refs) - 1, 0ull));
+        request_right.index = static_cast<std::uint32_t>(request_mid.index + (request_mid.num_refs == 0 ? 0ull : 2 * (request_mid.num_refs) - 1));
 #endif
 
         uint32_t next_level = request_right.level;

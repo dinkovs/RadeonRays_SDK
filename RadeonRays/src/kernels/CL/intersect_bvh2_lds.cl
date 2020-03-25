@@ -29,6 +29,8 @@ INCLUDES
 TYPE DEFINITIONS
 **************************************************************************/
 
+#define OVERLAP_FLAG 1
+
 #define INVALID_ADDR 0xffffffffu
 #define INTERNAL_NODE(node) (GetAddrLeft(node) != INVALID_ADDR)
 
@@ -40,7 +42,7 @@ TYPE DEFINITIONS
 typedef struct
 {
     float4 aabb_left_min_or_v0_and_addr_left;
-    float4 aabb_left_max_or_v1_and_mesh_id;
+    float4 aabb_left_max_or_v1_and_mesh_id_or_internal_flags;
     float4 aabb_right_min_or_v2_and_addr_right;
     float4 aabb_right_max_and_prim_id;
 
@@ -48,7 +50,7 @@ typedef struct
 
 #define GetAddrLeft(node)   as_uint((node).aabb_left_min_or_v0_and_addr_left.w)
 #define GetAddrRight(node)  as_uint((node).aabb_right_min_or_v2_and_addr_right.w)
-#define GetMeshId(node)     as_uint((node).aabb_left_max_or_v1_and_mesh_id.w)
+#define GetMeshId(node)     as_uint((node).aabb_left_max_or_v1_and_mesh_id_or_internal_flags.w)
 #define GetPrimId(node)     as_uint((node).aabb_right_max_and_prim_id.w)
 
 INLINE float2 fast_intersect_bbox2(float3 pmin, float3 pmax, float3 invdir, float3 oxinvdir, float t_max)
@@ -103,6 +105,10 @@ KERNEL void intersect_main(
             uint lds_stack_bottom = local_index * LDS_STACK_SIZE;
             uint lds_sptr = lds_stack_bottom;
 
+#if OVERLAP_FLAG
+            bool pop_if_hit = false;
+#endif
+
             lds_stack[lds_sptr++] = INVALID_ADDR;
 
             while (addr != INVALID_ADDR)
@@ -111,9 +117,13 @@ KERNEL void intersect_main(
 
                 if (INTERNAL_NODE(node))
                 {
+#if OVERLAP_FLAG
+                    pop_if_hit = false;
+#endif
+                
                     float2 s0 = fast_intersect_bbox2(
                         node.aabb_left_min_or_v0_and_addr_left.xyz,
-                        node.aabb_left_max_or_v1_and_mesh_id.xyz,
+                        node.aabb_left_max_or_v1_and_mesh_id_or_internal_flags.xyz,
                         invDir, oxInvDir, closest_t);
                     float2 s1 = fast_intersect_bbox2(
                         node.aabb_right_min_or_v2_and_addr_right.xyz,
@@ -141,6 +151,13 @@ KERNEL void intersect_main(
 
                         if (traverse_c0 && traverse_c1)
                         {
+#if OVERLAP_FLAG
+                            if (node.aabb_left_max_or_v1_and_mesh_id_or_internal_flags.w == 1)
+                            {
+                                pop_if_hit = true;
+                            }
+#endif
+
                             if (lds_sptr - lds_stack_bottom >= LDS_STACK_SIZE)
                             {
                                 for (int i = 1; i < LDS_STACK_SIZE; ++i)
@@ -167,18 +184,29 @@ KERNEL void intersect_main(
                         float t = fast_intersect_triangle(
                             my_ray,
                             node.aabb_left_min_or_v0_and_addr_left.xyz,
-                            node.aabb_left_max_or_v1_and_mesh_id.xyz,
+                            node.aabb_left_max_or_v1_and_mesh_id_or_internal_flags.xyz,
                             node.aabb_right_min_or_v2_and_addr_right.xyz,
                             closest_t);
 
                         if (t < closest_t)
                         {
+#if OVERLAP_FLAG
+                            if (pop_if_hit)
+                            {
+                                --lds_sptr;
+                            }
+#endif
+                            
                             closest_t = t;
                             closest_addr = addr;
                         }
 #ifdef RR_RAY_MASK
                     }
 #endif // RR_RAY_MASK
+
+#if OVERLAP_FLAG
+                    pop_if_hit = false;
+#endif
                 }
 
                 addr = lds_stack[--lds_sptr];
@@ -207,7 +235,7 @@ KERNEL void intersect_main(
                 const float2 uv = triangle_calculate_barycentrics(
                     p,
                     node.aabb_left_min_or_v0_and_addr_left.xyz,
-                    node.aabb_left_max_or_v1_and_mesh_id.xyz,
+                    node.aabb_left_max_or_v1_and_mesh_id_or_internal_flags.xyz,
                     node.aabb_right_min_or_v2_and_addr_right.xyz);
 
                 // Update hit information
@@ -273,7 +301,7 @@ KERNEL void occluded_main(
                 {
                     float2 s0 = fast_intersect_bbox2(
                         node.aabb_left_min_or_v0_and_addr_left.xyz,
-                        node.aabb_left_max_or_v1_and_mesh_id.xyz,
+                        node.aabb_left_max_or_v1_and_mesh_id_or_internal_flags.xyz,
                         invDir, oxInvDir, closest_t);
                     float2 s1 = fast_intersect_bbox2(
                         node.aabb_right_min_or_v2_and_addr_right.xyz,
@@ -327,7 +355,7 @@ KERNEL void occluded_main(
                         float t = fast_intersect_triangle(
                             my_ray,
                             node.aabb_left_min_or_v0_and_addr_left.xyz,
-                            node.aabb_left_max_or_v1_and_mesh_id.xyz,
+                            node.aabb_left_max_or_v1_and_mesh_id_or_internal_flags.xyz,
                             node.aabb_right_min_or_v2_and_addr_right.xyz,
                             closest_t);
 

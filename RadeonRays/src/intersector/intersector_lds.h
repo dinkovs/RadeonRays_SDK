@@ -25,7 +25,7 @@ THE SOFTWARE.
 #include "device.h"
 #include "intersector.h"
 
-#define BVH3 1
+#define BVH3 0
 
 #if BVH3
 #define BvhX Bvh3

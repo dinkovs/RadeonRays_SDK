@@ -215,7 +215,7 @@ namespace RadeonRays
                 copy3(node->aabb_left_max_or_v1, nodes_[qbvh_node_index].aabb01_max_or_v1);
                 copy3(node->aabb_right_min_or_v2, nodes_[qbvh_node_index].aabb23_min_or_v2);
 
-                nodes_[qbvh_node_index].addr1_or_mesh_id = node->mesh_id;
+                nodes_[qbvh_node_index].addr1_or_mesh_id = node->mesh_id_or_internal_flags;
                 nodes_[qbvh_node_index].addr2_or_prim_id = node->prim_id;
                 continue;
             }
@@ -260,7 +260,7 @@ namespace RadeonRays
                 copy3(c0->aabb_left_min_or_v0, child_node.aabb01_min_or_v0);
                 copy3(c0->aabb_left_max_or_v1, child_node.aabb01_max_or_v1);
                 copy3(c0->aabb_right_min_or_v2, child_node.aabb23_min_or_v2);
-                child_node.addr1_or_mesh_id = c0->mesh_id;
+                child_node.addr1_or_mesh_id = c0->mesh_id_or_internal_flags;
                 child_node.addr2_or_prim_id = c0->prim_id;
             }
 
@@ -298,7 +298,7 @@ namespace RadeonRays
                 copy3(c1->aabb_left_min_or_v0, child_node.aabb01_min_or_v0);
                 copy3(c1->aabb_left_max_or_v1, child_node.aabb01_max_or_v1);
                 copy3(c1->aabb_right_min_or_v2, child_node.aabb23_min_or_v2);
-                child_node.addr1_or_mesh_id = c1->mesh_id;
+                child_node.addr1_or_mesh_id = c1->mesh_id_or_internal_flags;
                 child_node.addr2_or_prim_id = c1->prim_id;
             }
         }
