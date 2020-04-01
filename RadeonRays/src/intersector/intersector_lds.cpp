@@ -42,7 +42,7 @@ using namespace std::chrono;
 #define PRINT_TREE 0
 #define SERIALIZE_RAYS 0
 #define PROFILE_TRAVERSAL 0
-
+#define SPHERE_BOUNDS 0
 
 struct Stats
 {
@@ -633,7 +633,12 @@ namespace RadeonRays
 
                 // Get the pointer to mapped data
                 Calc::Event *e = nullptr;
+#if SPHERE_BOUNDS
+                bvh_size_in_bytes = sizeof(BvhX::SphereNode) * (bvh_size_in_bytes / sizeof(BvhX::Node));
+                BvhX::SphereNode *bvhdata = nullptr;
+#else
                 BvhX::Node *bvhdata = nullptr;
+#endif
 
                 m_device->MapBuffer(m_gpudata->bvh, 0, 0, bvh_size_in_bytes, Calc::MapType::kMapWrite, (void **)&bvhdata, &e);
 
@@ -716,7 +721,11 @@ namespace RadeonRays
 #endif
 #endif
 
+#if SPHERE_BOUNDS
+                        bvhdata[i].Init(bvh.m_nodes[i]);
+#else
                         bvhdata[i] = bvh.m_nodes[i];
+#endif
 
 #if PROFILE_TRAVERSAL
                         GetEPO(&epodata[2 * i], i, 0, &bvh);

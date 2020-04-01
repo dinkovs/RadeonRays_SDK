@@ -30,6 +30,7 @@ TYPE DEFINITIONS
 **************************************************************************/
 
 #define OVERLAP_FLAG 1
+#define SPHERE_BOUNDS 0
 
 #define INVALID_ADDR 0xffffffffu
 #define INTERNAL_NODE(node) (GetAddrLeft(node) != INVALID_ADDR)
@@ -41,17 +42,38 @@ TYPE DEFINITIONS
 // BVH node
 typedef struct
 {
+#if SPHERE_BOUNDS
+    float4 sphere_left_center_or_v0_and_addr_left;
+    float4 sphere_right_center_or_v1_and_mesh_id_or_internal_flags;
+    float4 sphere_radii_or_v2_and_addr_right_or_prim_id;
+#else
     float4 aabb_left_min_or_v0_and_addr_left;
     float4 aabb_left_max_or_v1_and_mesh_id_or_internal_flags;
     float4 aabb_right_min_or_v2_and_addr_right;
     float4 aabb_right_max_and_prim_id;
-
+#endif
 } bvh_node;
 
+
+#if SPHERE_BOUNDS
+#define GetAddrLeft(node)   as_uint((node).sphere_left_center_or_v0_and_addr_left.w)
+#define GetAddrRight(node)  as_uint((node).sphere_radii_or_v2_and_addr_right_or_prim_id.w)
+#define GetMeshId(node)     as_uint((node).sphere_right_center_or_v1_and_mesh_id_or_internal_flags.w)
+#define GetPrimId(node)     as_uint((node).sphere_radii_or_v2_and_addr_right_or_prim_id.w)
+#define GetInternalFlags(node) as_uint((node).sphere_right_center_or_v1_and_mesh_id_or_internal_flags)
+#define GetVert0(node)      (node).sphere_left_center_or_v0_and_addr_left.xyz
+#define GetVert1(node)      (node).sphere_right_center_or_v1_and_mesh_id_or_internal_flags.xyz
+#define GetVert2(node)      (node).sphere_radii_or_v2_and_addr_right_or_prim_id.xyz
+#else
 #define GetAddrLeft(node)   as_uint((node).aabb_left_min_or_v0_and_addr_left.w)
 #define GetAddrRight(node)  as_uint((node).aabb_right_min_or_v2_and_addr_right.w)
 #define GetMeshId(node)     as_uint((node).aabb_left_max_or_v1_and_mesh_id_or_internal_flags.w)
 #define GetPrimId(node)     as_uint((node).aabb_right_max_and_prim_id.w)
+#define GetInternalFlags(node) as_uint((node).aabb_left_max_or_v1_and_mesh_id_or_internal_flags.w)
+#define GetVert0(node)      (node).aabb_left_min_or_v0_and_addr_left.xyz
+#define GetVert1(node)      (node).aabb_left_max_or_v1_and_mesh_id_or_internal_flags.xyz
+#define GetVert2(node)      (node).aabb_right_min_or_v2_and_addr_right.xyz
+#endif
 
 INLINE float2 fast_intersect_bbox2(float3 pmin, float3 pmax, float3 invdir, float3 oxinvdir, float t_max)
 {
@@ -62,6 +84,15 @@ INLINE float2 fast_intersect_bbox2(float3 pmin, float3 pmax, float3 invdir, floa
     const float t1 = min(min3(tmax.x, tmax.y, tmax.z), t_max);
     const float t0 = max(max3(tmin.x, tmin.y, tmin.z), 0.f);
     return (float2)(t0, t1);
+}
+
+INLINE float intersect_sphere(float3 center, float radius, float3 ray_orig, float3 ray_dir, float a)
+{
+    const float3 oc = ray_orig - center;
+    const float b = 2.0f * dot(oc, ray_dir);
+    const float c = dot(oc, oc) - (radius * radius);
+    const float desc = (b * b) - (4 * a * c);
+    return desc;
 }
 
 __attribute__((reqd_work_group_size(64, 1, 1)))
@@ -89,8 +120,12 @@ KERNEL void intersect_main(
 
         if (ray_is_active(&my_ray))
         {
+#if SPHERE_BOUNDS
+            const float a = dot(my_ray.d.xyz, my_ray.d.xyz);
+#else
             const float3 invDir = safe_invdir(my_ray);
             const float3 oxInvDir = -my_ray.o.xyz * invDir;
+#endif
 
             // Intersection parametric distance
             float closest_t = my_ray.o.w;
@@ -120,7 +155,21 @@ KERNEL void intersect_main(
 #if OVERLAP_FLAG
                     pop_if_hit = false;
 #endif
-                
+
+#if SPHERE_BOUNDS
+                    float desc0 = intersect_sphere(
+                        node.sphere_left_center_or_v0_and_addr_left.xyz,
+                        node.sphere_radii_or_v2_and_addr_right_or_prim_id.x,
+                        my_ray.o.xyz, my_ray.d.xyz, a);
+
+                    float desc1 = intersect_sphere(
+                        node.sphere_right_center_or_v1_and_mesh_id_or_internal_flags.xyz,
+                        node.sphere_radii_or_v2_and_addr_right_or_prim_id.y,
+                        my_ray.o.xyz, my_ray.d.xyz, a);
+                        
+                    bool traverse_c0 = (desc0 > 0);
+                    bool traverse_c1 = (desc1 > 0);
+#else
                     float2 s0 = fast_intersect_bbox2(
                         node.aabb_left_min_or_v0_and_addr_left.xyz,
                         node.aabb_left_max_or_v1_and_mesh_id_or_internal_flags.xyz,
@@ -133,12 +182,17 @@ KERNEL void intersect_main(
                     bool traverse_c0 = (s0.x <= s0.y);
                     bool traverse_c1 = (s1.x <= s1.y);
                     bool c1first = traverse_c1 && (s0.x > s1.x);
+#endif
 
                     if (traverse_c0 || traverse_c1)
                     {
                         uint deferred = INVALID_ADDR;
 
+#if SPHERE_BOUNDS
+                        if (!traverse_c0)
+#else
                         if (c1first || !traverse_c0) 
+#endif
                         {
                             addr = GetAddrRight(node);
                             deferred = GetAddrLeft(node);
@@ -152,7 +206,7 @@ KERNEL void intersect_main(
                         if (traverse_c0 && traverse_c1)
                         {
 #if OVERLAP_FLAG
-                            if (node.aabb_left_max_or_v1_and_mesh_id_or_internal_flags.w == 1)
+                            if (GetInternalFlags(node) == 1)
                             {
                                 pop_if_hit = true;
                             }
@@ -183,9 +237,9 @@ KERNEL void intersect_main(
 #endif // RR_RAY_MASK
                         float t = fast_intersect_triangle(
                             my_ray,
-                            node.aabb_left_min_or_v0_and_addr_left.xyz,
-                            node.aabb_left_max_or_v1_and_mesh_id_or_internal_flags.xyz,
-                            node.aabb_right_min_or_v2_and_addr_right.xyz,
+                            GetVert0(node),
+                            GetVert1(node),
+                            GetVert2(node),
                             closest_t);
 
                         if (t < closest_t)
@@ -234,9 +288,9 @@ KERNEL void intersect_main(
                 // Calculate barycentric coordinates
                 const float2 uv = triangle_calculate_barycentrics(
                     p,
-                    node.aabb_left_min_or_v0_and_addr_left.xyz,
-                    node.aabb_left_max_or_v1_and_mesh_id_or_internal_flags.xyz,
-                    node.aabb_right_min_or_v2_and_addr_right.xyz);
+                    GetVert0(node),
+                    GetVert1(node),
+                    GetVert2(node));
 
                 // Update hit information
                 hits[index].prim_id = GetPrimId(node);
@@ -278,8 +332,12 @@ KERNEL void occluded_main(
 
         if (ray_is_active(&my_ray))
         {
+#if SPHERE_BOUNDS
+            const float a = dot(my_ray.d.xyz, my_ray.d.xyz);
+#else
             const float3 invDir = safe_invdir(my_ray);
             const float3 oxInvDir = -my_ray.o.xyz * invDir;
+#endif
 
             // Current node address
             uint addr = 0;
@@ -299,6 +357,20 @@ KERNEL void occluded_main(
 
                 if (INTERNAL_NODE(node))
                 {
+#if SPHERE_BOUNDS
+                    float desc0 = intersect_sphere(
+                        node.sphere_left_center_or_v0_and_addr_left.xyz,
+                        node.sphere_radii_or_v2_and_addr_right_or_prim_id.x,
+                        my_ray.o.xyz, my_ray.d.xyz, a);
+
+                    float desc1 = intersect_sphere(
+                        node.sphere_right_center_or_v1_and_mesh_id_or_internal_flags.xyz,
+                        node.sphere_radii_or_v2_and_addr_right_or_prim_id.y,
+                        my_ray.o.xyz, my_ray.d.xyz, a);
+                        
+                    bool traverse_c0 = (desc0 > 0);
+                    bool traverse_c1 = (desc1 > 0);
+#else
                     float2 s0 = fast_intersect_bbox2(
                         node.aabb_left_min_or_v0_and_addr_left.xyz,
                         node.aabb_left_max_or_v1_and_mesh_id_or_internal_flags.xyz,
@@ -311,12 +383,17 @@ KERNEL void occluded_main(
                     bool traverse_c0 = (s0.x <= s0.y);
                     bool traverse_c1 = (s1.x <= s1.y);
                     bool c1first = traverse_c1 && (s0.x > s1.x);
+#endif
 
                     if (traverse_c0 || traverse_c1)
                     {
                         uint deferred = INVALID_ADDR;
-
-                        if (c1first || !traverse_c0)
+                        
+#if SPHERE_BOUNDS
+                        if (!traverse_c0)
+#else
+                        if (c1first || !traverse_c0) 
+#endif
                         {
                             addr = GetAddrRight(node);
                             deferred = GetAddrLeft(node);
@@ -354,9 +431,9 @@ KERNEL void occluded_main(
 #endif // RR_RAY_MASK
                         float t = fast_intersect_triangle(
                             my_ray,
-                            node.aabb_left_min_or_v0_and_addr_left.xyz,
-                            node.aabb_left_max_or_v1_and_mesh_id_or_internal_flags.xyz,
-                            node.aabb_right_min_or_v2_and_addr_right.xyz,
+                            GetVert0(node),
+                            GetVert1(node),
+                            GetVert2(node),
                             closest_t);
 
                         if (t < closest_t)

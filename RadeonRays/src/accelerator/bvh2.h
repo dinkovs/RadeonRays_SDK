@@ -44,6 +44,7 @@ namespace RadeonRays
     class Bvh2
     {
         struct Node;
+        struct SphereNode;
         struct SplitRequest;
         struct EpoData;
         struct Triangle;
@@ -197,6 +198,53 @@ namespace RadeonRays
             float aabb_right_max[3] = { 0.0f, 0.0f, 0.0f };
             // Primitive ID for a leaf node
             uint32_t prim_id = kInvalidId;
+        };
+
+        struct Bvh2::SphereNode
+        {
+            float sphere_left_center_or_v0[3] = { 0.0f, 0.0f, 0.0f };
+            uint32_t addr_left = kInvalidId;
+            float sphere_right_center_or_v1[3] = { 0.0f, 0.0f, 0.0f };
+            uint32_t mesh_id_or_internal_flags = kInvalidId;
+            float sphere_radii_or_v2[3] = { 0.0f, 0.0f, 0.0f };
+            uint32_t addr_right_or_prim_id = kInvalidId;
+
+            void Init(const Bvh2::Node& refNode)
+            {
+                addr_left = refNode.addr_left;
+                mesh_id_or_internal_flags = refNode.mesh_id_or_internal_flags;
+
+                if (IsInternal(refNode))
+                {
+                    sphere_left_center_or_v0[0] = (refNode.aabb_left_max_or_v1[0] + refNode.aabb_left_min_or_v0[0]) / 2.0f;
+                    sphere_left_center_or_v0[1] = (refNode.aabb_left_max_or_v1[1] + refNode.aabb_left_min_or_v0[1]) / 2.0f;
+                    sphere_left_center_or_v0[2] = (refNode.aabb_left_max_or_v1[2] + refNode.aabb_left_min_or_v0[2]) / 2.0f;
+
+                    sphere_right_center_or_v1[0] = (refNode.aabb_right_max[0] + refNode.aabb_right_min_or_v2[0]) / 2.0f;
+                    sphere_right_center_or_v1[1] = (refNode.aabb_right_max[1] + refNode.aabb_right_min_or_v2[1]) / 2.0f;
+                    sphere_right_center_or_v1[2] = (refNode.aabb_right_max[2] + refNode.aabb_right_min_or_v2[2]) / 2.0f;
+
+                    sphere_radii_or_v2[0] = sqrt(
+                        ((refNode.aabb_left_max_or_v1[0] - sphere_left_center_or_v0[0]) * (refNode.aabb_left_max_or_v1[0] - sphere_left_center_or_v0[0])) +
+                        ((refNode.aabb_left_max_or_v1[1] - sphere_left_center_or_v0[1]) * (refNode.aabb_left_max_or_v1[1] - sphere_left_center_or_v0[1])) +
+                        ((refNode.aabb_left_max_or_v1[2] - sphere_left_center_or_v0[2]) * (refNode.aabb_left_max_or_v1[2] - sphere_left_center_or_v0[2])));
+
+                    sphere_radii_or_v2[1] = sqrt(
+                        ((refNode.aabb_right_max[0] - sphere_right_center_or_v1[0]) * (refNode.aabb_right_max[0] - sphere_right_center_or_v1[0])) +
+                        ((refNode.aabb_right_max[1] - sphere_right_center_or_v1[1]) * (refNode.aabb_right_max[1] - sphere_right_center_or_v1[1])) +
+                        ((refNode.aabb_right_max[2] - sphere_right_center_or_v1[2]) * (refNode.aabb_right_max[2] - sphere_right_center_or_v1[2])));
+
+                    addr_right_or_prim_id = refNode.addr_right;
+                }
+                else
+                {
+                    memcpy(sphere_left_center_or_v0, refNode.aabb_left_min_or_v0, 3 * sizeof(float));
+                    memcpy(sphere_right_center_or_v1, refNode.aabb_left_max_or_v1, 3 * sizeof(float));
+                    memcpy(sphere_radii_or_v2, refNode.aabb_right_min_or_v2, 3 * sizeof(float));
+
+                    addr_right_or_prim_id = refNode.prim_id;
+                }
+            }
         };
 
         struct Bvh2::Triangle
