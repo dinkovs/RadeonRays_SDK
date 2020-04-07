@@ -29,8 +29,9 @@ INCLUDES
 TYPE DEFINITIONS
 **************************************************************************/
 
-#define OVERLAP_FLAG 1
+#define OVERLAP_FLAG2 0
 #define SPHERE_BOUNDS 0
+#define PROFILE_TRAVERSAL_LITE 0
 
 #define INVALID_ADDR 0xffffffffu
 #define INTERNAL_NODE(node) (GetAddrLeft(node) != INVALID_ADDR)
@@ -54,6 +55,15 @@ typedef struct
 #endif
 } bvh_node;
 
+#if PROFILE_TRAVERSAL_LITE
+typedef struct
+{
+    uint skippedNodes;
+    uint stored;
+    uint retrieved;
+    uint padding;
+} statsLite;
+#endif
 
 #if SPHERE_BOUNDS
 #define GetAddrLeft(node)   as_uint((node).sphere_left_center_or_v0_and_addr_left.w)
@@ -73,6 +83,13 @@ typedef struct
 #define GetVert0(node)      (node).aabb_left_min_or_v0_and_addr_left.xyz
 #define GetVert1(node)      (node).aabb_left_max_or_v1_and_mesh_id_or_internal_flags.xyz
 #define GetVert2(node)      (node).aabb_right_min_or_v2_and_addr_right.xyz
+#endif
+
+#if OVERLAP_FLAG2
+#define OVERLAP_FLAG2_BIT    0x80000000u
+#define ADDR_BITS            0x7FFFFFFFu
+#define GetNodeAddr(data)    data & ADDR_BITS
+#define GetOverlapFlag(data) data & OVERLAP_FLAG2_BIT
 #endif
 
 INLINE float2 fast_intersect_bbox2(float3 pmin, float3 pmax, float3 invdir, float3 oxinvdir, float t_max)
@@ -106,7 +123,11 @@ KERNEL void intersect_main(
     // Stack memory
     GLOBAL uint *stack,
     // Hit data
-    GLOBAL Intersection *hits)
+    GLOBAL Intersection *hits
+#if PROFILE_TRAVERSAL_LITE
+    , GLOBAL statsLite *stats_lite
+#endif
+    )
 {
     __local uint lds_stack[GROUP_SIZE * LDS_STACK_SIZE];
 
@@ -140,10 +161,6 @@ KERNEL void intersect_main(
             uint lds_stack_bottom = local_index * LDS_STACK_SIZE;
             uint lds_sptr = lds_stack_bottom;
 
-#if OVERLAP_FLAG
-            bool pop_if_hit = false;
-#endif
-
             lds_stack[lds_sptr++] = INVALID_ADDR;
 
             while (addr != INVALID_ADDR)
@@ -152,10 +169,6 @@ KERNEL void intersect_main(
 
                 if (INTERNAL_NODE(node))
                 {
-#if OVERLAP_FLAG
-                    pop_if_hit = false;
-#endif
-
 #if SPHERE_BOUNDS
                     float desc0 = intersect_sphere(
                         node.sphere_left_center_or_v0_and_addr_left.xyz,
@@ -205,13 +218,6 @@ KERNEL void intersect_main(
 
                         if (traverse_c0 && traverse_c1)
                         {
-#if OVERLAP_FLAG
-                            if (GetInternalFlags(node) == 1)
-                            {
-                                pop_if_hit = true;
-                            }
-#endif
-
                             if (lds_sptr - lds_stack_bottom >= LDS_STACK_SIZE)
                             {
                                 for (int i = 1; i < LDS_STACK_SIZE; ++i)
@@ -222,10 +228,13 @@ KERNEL void intersect_main(
                                 sptr += LDS_STACK_SIZE;
                                 lds_sptr = lds_stack_bottom + 1;
                             }
-
+                            
+#if OVERLAP_FLAG2
+                            deferred |= (OVERLAP_FLAG2_BIT * as_uint((s1.x < s0.y) && (s0.x < s1.y)));
+#endif
                             lds_stack[lds_sptr++] = deferred;
                         }
-
+                        
                         continue;
                     }
                 }
@@ -243,39 +252,55 @@ KERNEL void intersect_main(
                             closest_t);
 
                         if (t < closest_t)
-                        {
-#if OVERLAP_FLAG
-                            if (pop_if_hit)
-                            {
-                                --lds_sptr;
-                            }
-#endif
-                            
+                        {   
                             closest_t = t;
+                            
                             closest_addr = addr;
                         }
 #ifdef RR_RAY_MASK
                     }
 #endif // RR_RAY_MASK
+                }
 
-#if OVERLAP_FLAG
-                    pop_if_hit = false;
+#if OVERLAP_FLAG2
+                bool get_next_addr = true;
+                
+                while (get_next_addr && (addr != INVALID_ADDR))
+                {
+#endif
+                    addr = lds_stack[--lds_sptr];
+
+                    if (addr == INVALID_ADDR && sptr > stack_bottom)
+                    {
+                        sptr -= LDS_STACK_SIZE;
+                        for (int i = 1; i < LDS_STACK_SIZE; ++i)
+                        {
+                            lds_stack[lds_stack_bottom + i] = stack[sptr + i];
+                        }
+
+                        lds_sptr = lds_stack_bottom + LDS_STACK_SIZE - 1;
+                        addr = lds_stack[lds_sptr];
+                    }
+                         
+#if OVERLAP_FLAG2
+                    if ((GetOverlapFlag(addr)) || (closest_addr == INVALID_ADDR))
+                    {
+                        // Keep checking further nodes they overlap or if not hit was found
+                        get_next_addr = false;
+                        
+                        if (addr != INVALID_ADDR)
+                        {
+                            addr = GetNodeAddr(addr);
+                        }
+                    }
+#if PROFILE_TRAVERSAL_LITE
+                    else
+                    {
+                        stats_lite[index].skippedNodes++;
+                    }
 #endif
                 }
-
-                addr = lds_stack[--lds_sptr];
-
-                if (addr == INVALID_ADDR && sptr > stack_bottom)
-                {
-                    sptr -= LDS_STACK_SIZE;
-                    for (int i = 1; i < LDS_STACK_SIZE; ++i)
-                    {
-                        lds_stack[lds_stack_bottom + i] = stack[sptr + i];
-                    }
-
-                    lds_sptr = lds_stack_bottom + LDS_STACK_SIZE - 1;
-                    addr = lds_stack[lds_sptr];
-                }
+#endif          
             }
 
             // Check if we have found an intersection

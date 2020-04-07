@@ -42,6 +42,7 @@ using namespace std::chrono;
 #define PRINT_TREE 0
 #define SERIALIZE_RAYS 0
 #define PROFILE_TRAVERSAL 0
+#define PROFILE_TRAVERSAL_LITE 0
 #define SPHERE_BOUNDS 0
 
 struct Stats
@@ -54,6 +55,14 @@ struct Stats
     float surfaceAreaSumLeaf;
     float pad0;
     float pad1;
+};
+
+struct StatsLite
+{
+    uint32_t skippedNodes;
+    uint32_t stored;
+    uint32_t retrieved;
+    uint32_t padding;
 };
 
 namespace Math
@@ -874,6 +883,10 @@ namespace RadeonRays
 #endif
 #endif
 
+#if PROFILE_TRAVERSAL_LITE
+        Calc::Buffer* stats = m_device->CreateBuffer(max_rays * sizeof(StatsLite), Calc::BufferType::kWrite);
+#endif
+
         func->SetArg(arg++, m_gpudata->bvh);
         func->SetArg(arg++, rays);
         func->SetArg(arg++, num_rays);
@@ -901,6 +914,9 @@ namespace RadeonRays
         profiling_func->SetArg(profiling_arg++, m_epoBuffer);
         profiling_func->SetArg(profiling_arg++, m_surfAreaBuffer);
 #endif
+#endif
+#if PROFILE_TRAVERSAL_LITE
+        func->SetArg(arg++, stats);
 #endif
 
         std::size_t localsize = kWorkGroupSize;
@@ -967,6 +983,36 @@ namespace RadeonRays
         exit(0);
 #else
         m_device->Execute(func, queue_idx, globalsize, localsize, event);
+#endif
+
+#if PROFILE_TRAVERSAL_LITE
+        StatsLite* stats_data = new StatsLite[max_rays];
+        memset(stats_data, 0, sizeof(StatsLite) * max_rays);
+        m_device->ReadBuffer(stats, queue_idx, 0, max_rays * sizeof(StatsLite), stats_data, event);
+
+        std::ofstream file;
+
+        char filename[1024];
+        memset(filename, 0, 1024);
+        strcat(filename, "C:\\git\\Baikal_Mine\\build\\");
+        strcat(filename, getenv("BAIKAL_MODEL_NAME"));
+
+        char* comma = strstr(filename, ",");
+        if (comma != nullptr) { strncpy(comma, "\0", 1); }
+
+        strcat(filename, ".csv");
+
+        file.open(filename);
+        if (file.is_open())
+        {
+            file << "index,skippedNodes,padding,padding,padding\n";
+            for (uint32_t i = 0; i < num_rays_data; i++)
+            {
+                file << i << "," << stats_data[i].skippedNodes << "," << stats_data[i].stored << "," << stats_data[i].retrieved << "," << stats_data[i].padding << ",\n";
+            }
+        }
+        file.close();
+        exit(0);
 #endif
     }
 
